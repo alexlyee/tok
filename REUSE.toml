@@ -1,0 +1,6 @@
+version = 1
+
+[[annotations]]
+path = "Cargo.lock"
+SPDX-FileCopyrightText = "2026 tok contributors"
+SPDX-License-Identifier = "MPL-2.0"

@@ -1,0 +1,6 @@
+# SPDX-FileCopyrightText: 2026 tok contributors
+#
+# SPDX-License-Identifier: MPL-2.0
+
+/target
+/calibration.tsv
