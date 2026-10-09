@@ -8,7 +8,7 @@ use counter::*;
 
 use std::fs::{self, File};
 use std::io::{self, BufReader, IsTerminal, Read};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process;
 
 use clap::Parser;
@@ -26,6 +26,7 @@ EXAMPLES:
     tok ./notes/                          count .md and .txt files recursively
     tok -xrs,toml ./src/                  count .rs and .toml files
     tok -a ./project/                     count all text files
+    tok -aX'target/**' ./project/         exclude target/ on top of defaults
 
     A bare argument that looks like a filename (report.pdf) is treated as a
     path, so a typo errors instead of counting itself as text. To count such
@@ -42,6 +43,14 @@ struct Cli {
     /// Include all text files in directory mode (skip binary). Overrides --ext
     #[arg(short, long)]
     all: bool,
+
+    /// Gitignore-style glob to exclude (repeatable)
+    #[arg(short = 'X', long = "exclude")]
+    exclude: Vec<String>,
+
+    /// Disable default exclusions (node_modules, components starting with . or _)
+    #[arg(short = 'A', long = "no-default-excludes")]
+    no_default_excludes: bool,
 }
 
 fn print_usage() {
@@ -107,7 +116,41 @@ fn is_binary(path: &Path) -> bool {
     buf[..n].contains(&0)
 }
 
-fn collect_dir_files(root: &Path, cli: &Cli) -> Vec<PathBuf> {
+fn default_excluded(rel: &Path) -> bool {
+    for comp in rel.components() {
+        if let Component::Normal(c) = comp {
+            let s = c.to_string_lossy();
+            if s == "node_modules" {
+                return true;
+            }
+            if s.starts_with('.') || s.starts_with('_') {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn matches_any_glob(rel: &Path, patterns: &[glob::Pattern]) -> bool {
+    if patterns.is_empty() {
+        return false;
+    }
+    let s = rel.to_string_lossy();
+    let opts = glob::MatchOptions {
+        case_sensitive: true,
+        require_literal_separator: false,
+        require_literal_leading_dot: false,
+    };
+    patterns.iter().any(|p| {
+        p.matches_with(&s, opts)
+            || rel
+                .file_name()
+                .map(|n| p.matches_with(&n.to_string_lossy(), opts))
+                .unwrap_or(false)
+    })
+}
+
+fn collect_dir_files(root: &Path, cli: &Cli, excludes: &[glob::Pattern]) -> Vec<PathBuf> {
     let extensions: Vec<String> = if cli.all {
         vec![]
     } else if cli.ext.is_empty() {
@@ -123,6 +166,13 @@ fn collect_dir_files(root: &Path, cli: &Cli) -> Vec<PathBuf> {
 
     let mut files: Vec<PathBuf> = walkdir::WalkDir::new(root)
         .into_iter()
+        .filter_entry(|e| {
+            let rel = e.path().strip_prefix(root).unwrap_or(e.path());
+            if !cli.no_default_excludes && default_excluded(rel) {
+                return false;
+            }
+            !matches_any_glob(rel, excludes)
+        })
         .flatten()
         .filter(|e| e.file_type().is_file())
         .map(|e| e.into_path())
@@ -171,6 +221,18 @@ fn main() {
     let cli = Cli::parse();
     let bpe = default_bpe();
 
+    let exclude_patterns: Vec<glob::Pattern> = cli
+        .exclude
+        .iter()
+        .filter_map(|s| match glob::Pattern::new(s) {
+            Ok(p) => Some(p),
+            Err(e) => {
+                eprintln!("tok: invalid exclude '{}': {}", s, e);
+                None
+            }
+        })
+        .collect();
+
     if cli.input.is_empty() {
         if io::stdin().is_terminal() {
             print_usage();
@@ -195,7 +257,7 @@ fn main() {
     for arg in &cli.input {
         let path = Path::new(arg);
         if path.is_dir() {
-            let files = collect_dir_files(path, &cli);
+            let files = collect_dir_files(path, &cli, &exclude_patterns);
             if files.is_empty() {
                 eprintln!("tok: {}: no matching files found", arg);
             }

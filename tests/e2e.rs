@@ -241,3 +241,69 @@ fn t19_large_input() {
     let count: usize = stdout.trim().parse().expect("should be integer");
     assert!(count > 1000);
 }
+
+// 23. Default exclude — dotfiles
+#[test]
+fn t23_default_exclude_dotfiles() {
+    let dir = tempfile::tempdir().unwrap();
+    let visible = dir.path().join("visible.md");
+    std::fs::create_dir(dir.path().join(".hidden")).unwrap();
+    std::fs::write(dir.path().join(".hidden/note.md"), "hidden content here").unwrap();
+    std::fs::write(&visible, "visible content").unwrap();
+
+    let total = count(&[dir.path().to_str().unwrap()]);
+    assert_eq!(total, count(&[visible.to_str().unwrap()]), "only visible.md should be counted");
+}
+
+// 24. Default exclude — node_modules
+#[test]
+fn t24_default_exclude_node_modules() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("src.md");
+    std::fs::create_dir(dir.path().join("node_modules")).unwrap();
+    std::fs::write(dir.path().join("node_modules/lib.md"), "should be skipped").unwrap();
+    std::fs::write(&src, "should be counted").unwrap();
+
+    let total = count(&[dir.path().to_str().unwrap()]);
+    assert_eq!(total, count(&[src.to_str().unwrap()]));
+}
+
+// 25. Default exclude — underscore-prefixed
+#[test]
+fn t25_default_exclude_underscore() {
+    let dir = tempfile::tempdir().unwrap();
+    let published = dir.path().join("pub.md");
+    std::fs::create_dir(dir.path().join("_drafts")).unwrap();
+    std::fs::write(dir.path().join("_drafts/x.md"), "draft text").unwrap();
+    std::fs::write(&published, "published text").unwrap();
+
+    let total = count(&[dir.path().to_str().unwrap()]);
+    assert_eq!(total, count(&[published.to_str().unwrap()]));
+}
+
+// 26. --no-default-excludes restores hidden files
+#[test]
+fn t26_no_default_excludes() {
+    let dir = tempfile::tempdir().unwrap();
+    let hidden = dir.path().join(".hidden/note.md");
+    let visible = dir.path().join("visible.md");
+    std::fs::create_dir(dir.path().join(".hidden")).unwrap();
+    std::fs::write(&hidden, "hidden content here").unwrap();
+    std::fs::write(&visible, "visible content").unwrap();
+
+    let total = count(&["-A", dir.path().to_str().unwrap()]);
+    let expected = count(&[hidden.to_str().unwrap()]) + count(&[visible.to_str().unwrap()]);
+    assert_eq!(total, expected, "both files should be counted");
+}
+
+// 27. --exclude pattern
+#[test]
+fn t27_exclude_pattern() {
+    let dir = tempfile::tempdir().unwrap();
+    let keep = dir.path().join("keep.md");
+    std::fs::write(&keep, "kept content").unwrap();
+    std::fs::write(dir.path().join("skip.md"), "skipped content").unwrap();
+
+    let total = count(&["-X", "skip.md", dir.path().to_str().unwrap()]);
+    assert_eq!(total, count(&[keep.to_str().unwrap()]), "only keep.md remains");
+}
