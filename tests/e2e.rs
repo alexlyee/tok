@@ -117,6 +117,21 @@ fn t05_file_vs_string_disambiguation() {
     assert_ne!(file_count, lit_count, "should count file contents, not filename string");
 }
 
+// 6. Multiple files
+#[test]
+fn t06_multiple_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let f1 = dir.path().join("a.txt");
+    let f2 = dir.path().join("b.txt");
+    std::fs::write(&f1, "hello world").unwrap();
+    std::fs::write(&f2, "foo bar baz").unwrap();
+
+    let total = count(&[f1.to_str().unwrap(), f2.to_str().unwrap()]);
+    let c1 = count(&[f1.to_str().unwrap()]);
+    let c2 = count(&[f2.to_str().unwrap()]);
+    assert_eq!(c1 + c2, total, "total should equal sum of parts");
+}
+
 // 7. Directory mode (default md + txt; .rs excluded)
 #[test]
 fn t07_directory_mode() {
@@ -160,6 +175,22 @@ fn t09_directory_all() {
     let total = count(&["-a", dir.path().to_str().unwrap()]);
     let expected: usize = [&a, &b, &c].iter().map(|f| count(&[f.to_str().unwrap()])).sum();
     assert_eq!(total, expected, "all three text files, and not the binary one");
+}
+
+// 10. Glob expansion (quoted glob expanded internally)
+#[test]
+fn t10_glob_expansion() {
+    let dir = tempfile::tempdir().unwrap();
+    let one = dir.path().join("one.md");
+    let two = dir.path().join("two.md");
+    std::fs::write(&one, "first note").unwrap();
+    std::fs::write(&two, "second note").unwrap();
+    std::fs::write(dir.path().join("three.txt"), "not matched").unwrap();
+
+    let glob_pattern = format!("{}/*.md", dir.path().display());
+    let total = count(&[&glob_pattern]);
+    let expected = count(&[one.to_str().unwrap()]) + count(&[two.to_str().unwrap()]);
+    assert_eq!(total, expected, "only the two .md files should be counted");
 }
 
 // 15. Empty input

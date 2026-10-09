@@ -32,7 +32,7 @@ EXAMPLES:
     a string, pipe it: echo 'node.js' | tok"
 )]
 struct Cli {
-    /// Text strings, file paths, or directories
+    /// Text strings, file paths, directories, or glob patterns
     input: Vec<String>,
 
     /// File extensions to include in directory mode (without dot, repeatable). Default: md, txt
@@ -90,6 +90,10 @@ fn looks_like_path(s: &str) -> bool {
         })
         .unwrap_or(false);
     ext_ok && stem_ok
+}
+
+fn has_glob_meta(s: &str) -> bool {
+    s.contains('*') || s.contains('?') || s.contains('[')
 }
 
 fn is_binary(path: &Path) -> bool {
@@ -198,6 +202,22 @@ fn main() {
             all_files.extend(files);
         } else if path.is_file() {
             all_files.push(path.to_path_buf());
+        } else if has_glob_meta(arg) {
+            match glob::glob(arg) {
+                Ok(paths) => {
+                    let matched: Vec<PathBuf> = paths.filter_map(|p| p.ok()).collect();
+                    if matched.is_empty() {
+                        eprintln!("tok: note: glob '{}' matched no files, treating as string", arg);
+                        string_args.push(arg.clone());
+                    } else {
+                        all_files.extend(matched);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("tok: invalid glob '{}': {}", arg, e);
+                    process::exit(1);
+                }
+            }
         } else if looks_like_path(arg) {
             eprintln!("tok: {}: No such file or directory", arg);
             process::exit(1);
