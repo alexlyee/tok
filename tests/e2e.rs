@@ -44,6 +44,12 @@ fn run_tok_stdin(input: &[u8], args: &[&str]) -> (String, String, i32) {
     )
 }
 
+fn count(args: &[&str]) -> usize {
+    let (stdout, stderr, code) = run_tok(args);
+    assert_eq!(code, 0, "tok {:?} failed: {}", args, stderr);
+    stdout.trim().parse().expect("should be integer")
+}
+
 // 1. String mode
 #[test]
 fn t01_string_mode() {
@@ -111,12 +117,68 @@ fn t05_file_vs_string_disambiguation() {
     assert_ne!(file_count, lit_count, "should count file contents, not filename string");
 }
 
+// 7. Directory mode (default md + txt; .rs excluded)
+#[test]
+fn t07_directory_mode() {
+    let dir = tempfile::tempdir().unwrap();
+    let md = dir.path().join("note.md");
+    let rs = dir.path().join("code.rs");
+    let txt = dir.path().join("data.txt");
+    std::fs::write(&md, "markdown tokens here").unwrap();
+    std::fs::write(&rs, "fn main() {}").unwrap();
+    std::fs::write(&txt, "plain text data").unwrap();
+
+    let total = count(&[dir.path().to_str().unwrap()]);
+    let expected = count(&[md.to_str().unwrap()]) + count(&[txt.to_str().unwrap()]);
+    assert_eq!(total, expected, "only note.md and data.txt should be counted");
+}
+
+// 8. Directory with --ext
+#[test]
+fn t08_directory_ext() {
+    let dir = tempfile::tempdir().unwrap();
+    let txt = dir.path().join("data.txt");
+    std::fs::write(dir.path().join("note.md"), "markdown").unwrap();
+    std::fs::write(&txt, "plain text data here for testing").unwrap();
+
+    let total = count(&["-x", "txt", dir.path().to_str().unwrap()]);
+    assert_eq!(total, count(&[txt.to_str().unwrap()]), "only data.txt should be counted");
+}
+
+// 9. Directory with --all
+#[test]
+fn t09_directory_all() {
+    let dir = tempfile::tempdir().unwrap();
+    let a = dir.path().join("a.md");
+    let b = dir.path().join("b.rs");
+    let c = dir.path().join("c.txt");
+    std::fs::write(&a, "markdown content").unwrap();
+    std::fs::write(&b, "fn main() { println!(\"hello\"); }").unwrap();
+    std::fs::write(&c, "text content").unwrap();
+    std::fs::write(dir.path().join("d.bin"), b"\x00\x01\x02 binary").unwrap();
+
+    let total = count(&["-a", dir.path().to_str().unwrap()]);
+    let expected: usize = [&a, &b, &c].iter().map(|f| count(&[f.to_str().unwrap()])).sum();
+    assert_eq!(total, expected, "all three text files, and not the binary one");
+}
+
 // 15. Empty input
 #[test]
 fn t15_empty_input() {
     let (stdout, _, code) = run_tok(&[""]);
     assert_eq!(code, 0);
     assert_eq!(stdout.trim(), "0");
+}
+
+// 16. Empty directory
+#[test]
+fn t16_empty_directory() {
+    let dir = tempfile::tempdir().unwrap();
+
+    let (stdout, stderr, code) = run_tok(&[dir.path().to_str().unwrap()]);
+    assert_eq!(code, 0);
+    assert_eq!(stdout.trim(), "0");
+    assert!(!stderr.is_empty(), "stderr should note no matching files");
 }
 
 // 17. Missing file

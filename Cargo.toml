@@ -15,6 +15,7 @@ categories = ["command-line-utilities", "text-processing"]
 [dependencies]
 tiktoken-rs = "0.6"
 clap = { version = "4", features = ["derive"] }
+walkdir = "2"
 
 [dev-dependencies]
 tempfile = "3"

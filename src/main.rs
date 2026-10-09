@@ -6,8 +6,8 @@
 mod counter;
 use counter::*;
 
-use std::fs;
-use std::io::{self, IsTerminal, Read};
+use std::fs::{self, File};
+use std::io::{self, BufReader, IsTerminal, Read};
 use std::path::{Path, PathBuf};
 use std::process;
 
@@ -23,14 +23,25 @@ EXAMPLES:
     tok \"hello world\"                     count tokens in a string
     tok myfile.md                         count tokens in a file
     echo \"text\" | tok                     count tokens from stdin
+    tok ./notes/                          count .md and .txt files recursively
+    tok -xrs,toml ./src/                  count .rs and .toml files
+    tok -a ./project/                     count all text files
 
     A bare argument that looks like a filename (report.pdf) is treated as a
     path, so a typo errors instead of counting itself as text. To count such
     a string, pipe it: echo 'node.js' | tok"
 )]
 struct Cli {
-    /// Text strings or file paths
+    /// Text strings, file paths, or directories
     input: Vec<String>,
+
+    /// File extensions to include in directory mode (without dot, repeatable). Default: md, txt
+    #[arg(short = 'x', long = "ext")]
+    ext: Vec<String>,
+
+    /// Include all text files in directory mode (skip binary). Overrides --ext
+    #[arg(short, long)]
+    all: bool,
 }
 
 fn print_usage() {
@@ -38,6 +49,8 @@ fn print_usage() {
     eprintln!("       echo \"text\" | tok");
     eprintln!("       tok \"text to count\"");
     eprintln!("       tok path/to/file.md");
+    eprintln!("       tok file1.md file2.md");
+    eprintln!("       tok ./directory/");
     eprintln!("\nRun 'tok --help' for full options.");
 }
 
@@ -77,6 +90,49 @@ fn looks_like_path(s: &str) -> bool {
         })
         .unwrap_or(false);
     ext_ok && stem_ok
+}
+
+fn is_binary(path: &Path) -> bool {
+    let Ok(file) = File::open(path) else {
+        return false;
+    };
+    let mut buf = [0u8; 8192];
+    let Ok(n) = io::Read::read(&mut BufReader::new(file), &mut buf) else {
+        return false;
+    };
+    buf[..n].contains(&0)
+}
+
+fn collect_dir_files(root: &Path, cli: &Cli) -> Vec<PathBuf> {
+    let extensions: Vec<String> = if cli.all {
+        vec![]
+    } else if cli.ext.is_empty() {
+        vec!["md".to_string(), "txt".to_string()]
+    } else {
+        cli.ext
+            .iter()
+            .flat_map(|e| e.split(','))
+            .map(|e| e.trim().to_lowercase())
+            .filter(|e| !e.is_empty())
+            .collect()
+    };
+
+    let mut files: Vec<PathBuf> = walkdir::WalkDir::new(root)
+        .into_iter()
+        .flatten()
+        .filter(|e| e.file_type().is_file())
+        .map(|e| e.into_path())
+        .filter(|path| {
+            if cli.all {
+                !is_binary(path)
+            } else {
+                let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+                extensions.iter().any(|e| *e == ext)
+            }
+        })
+        .collect();
+    files.sort();
+    files
 }
 
 fn count_file(bpe: &tiktoken_rs::CoreBPE, path: &Path) -> usize {
@@ -134,7 +190,13 @@ fn main() {
 
     for arg in &cli.input {
         let path = Path::new(arg);
-        if path.is_file() {
+        if path.is_dir() {
+            let files = collect_dir_files(path, &cli);
+            if files.is_empty() {
+                eprintln!("tok: {}: no matching files found", arg);
+            }
+            all_files.extend(files);
+        } else if path.is_file() {
             all_files.push(path.to_path_buf());
         } else if looks_like_path(arg) {
             eprintln!("tok: {}: No such file or directory", arg);
